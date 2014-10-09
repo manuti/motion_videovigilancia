@@ -1,0 +1,19 @@
+#!/bin/bash
+
+if [ $1 = "--imagenes" ]; then
+        FICHERO="/var/www/pi/imagenes"
+elif [ $1 = "--videos" ]; then
+        FICHERO="/var/www/pi/videos"
+else
+        echo "Mal uso."
+        echo "Ejecucion correcta: ./descript [opcion]"
+        echo "Posibles opciones: --imagenes --videos"
+        exit
+fi
+
+md5sum -c $FICHERO/*asc > $FICHERO/datos-integridad.txt
+suma=$(grep -lir "La suma no coincide" $FICHERO/*txt | wc -l)
+
+if [ $suma == 0 ]; then
+        gpg2 --multifile -d $FICHERO/*gpg
+fi
