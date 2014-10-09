@@ -1,0 +1,4 @@
+#!/bin/bash
+
+sudo cp /tmp/motion/LOCAL-img* /home/pi/img-seguridad/
+sudo cp /tmp/motion/LOCAL-mov* /home/pi/video-seguridad/
