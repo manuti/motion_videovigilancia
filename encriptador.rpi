@@ -1,0 +1,113 @@
+#!/bin/bash
+
+### ENCRIPTADOR DE IMAGENES Y VIDEOS PARA RASPBERRY PI
+#
+# AUTOR: @bollit0
+# 
+# DESCRIPCION: Script que se encarga de encriptar con gpg2 ficheros de imagenes .jpg y video .avi. Tambien se encarga de crear un archivo .asc con la suma md5 de los ficheros 
+#	       encriptados de manera que al pasarlos al servidor se pueda comprobar la integridad de los mismos.
+#
+# SERVICIOS NECESARIOS:
+#	- motion
+#	- gpg2
+#	- md5sum
+#
+# CONSTANTES DEL SCRIPT:
+#	- PSRPI     -> path del directorio que contiene temporalmente los archivos de seguridad
+#       - PCRPI     -> path del directorio donde se copian y tratan los archivos
+#       - PSERVER   -> path del directorio donde se envian los archivos
+#       - PCOPIAS   -> path del directorio temporal para comprobaciones de copia al servidor
+#       - PSED      -> cadena de caracteres que usa sed para modificar el fichero .asc de manera que al pasarlo al servidor no tenga problemas de rutas
+#	- SELECCION -> cadena de caracteres con los archivos que vamos a tratar, jpg para imagenes y avi para video
+#
+# USO CORRECTO DEL PROGRAMA:
+#	./encriptador [opcion]
+#
+#	--imagenes
+#		se tratan los archivos de imagenes
+#	--videos
+#		se tratan los archivos de video
+### ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+if [ $1 = "--imagenes" ]; then
+	PSRPI="/home/pi/img-seguridad"
+	PCRPI="/home/pi/img-cifradas"
+	PSERVER="/var/www/pi/imagenes"
+	PCOPIAS="/home/pi/cp-seg-img"
+	PSED="\/home\/pi\/img-cifradas\/"
+	SELECCION="*jpg"
+elif [ $1 = "--videos" ]; then 
+	PSRPI="/home/pi/video-seguridad"
+        PCRPI="/home/pi/video-cifrados"
+        PSERVER="/var/www/pi/videos"
+	PCOPIAS="/home/pi/cp-seg-videos"
+	PSED="\/home\/pi\/video-cifrados\/"
+	SELECCION="*avi"
+
+else
+	echo "MAL USO DEL PROGRAMA"
+	echo "EJECUCION CORRECTA: ./encriptador [opciones]"
+	echo "POSIBLES OPCIONES: --imagenes --videos"
+	exit
+fi
+
+#Copiamos los archivos a otro directorio para tratarlos
+sudo cp -n $PSRPI/$SELECCION $PCRPI/
+
+#Ciframos los archivos
+sudo gpg2 --multifile -e -r ADA00AA9 $PCRPI/$SELECCION
+
+#Eliminamos jpg
+sudo rm -f $PSRPI/$SELECCION
+sudo rm -f $PCRPI/$SELECCION
+
+#Creamos fichero md5
+sudo md5sum $PCRPI/*gpg > $PCRPI/md5.asc
+
+HOY=$(date +%Y%m%d%H%M)
+FECHA=$(date +%Y%m%d)
+
+if [ $1 == "--imagenes" ]; then
+	sed 's/\/home\/pi\/img-cifradas\///g' $PCRPI/md5.asc >> $PCRPI/verificacion-md5-$HOY.asc
+elif [ $1 = "--videos" ]; then
+	sed 's/\/home\/pi\/video-cifrados\///g' $PCRPI/md5.asc >> $PCRPI/verificacion-md5-$HOY.asc
+fi
+
+#Los pasamos a un servidor seguro
+#
+# OJO QUE HAY QUE PONER LA IP FIJA DEL SERVIDOR
+#
+scp $PCRPI/*gpg raspi@IP_FIJA-SERVIDOR:$PSERVER
+scp $PCRPI/*.asc raspi@IP_FIJA_SERVIDOR:$PSERVER
+
+# Comprobaciones de que todo se ha hecho correctamente:
+# Nos traemos las imágenes de nuevo a la pi, con la fecha del día actual, para eso utilizamos la variable FECHA,
+# comprobamos que el numero de archivos que traemos es mayor o igual al que tenemos nosotros aqui, puede ser mayor
+# ya que si en un mismo dia se hacen varias copias habria un mayor numero de ficheros
+scp raspi@IP_FIJA-SERVIDOR:$PSERVER/*$FECHA* $PCOPIAS/
+scp raspi@IP_FIJA-SERVIDOR:$PSERVER/*$FECHA* $PCOPIAS/
+
+NUM1=$(ls -l $PCOPIAS/ | grep .gpg | wc -l)
+NUM2=$(ls -l $PCRPI/ | grep .gpg | wc -l)
+
+# En caso de que se hayan copiado correctamente borramos los archivos locales
+if [ "$NUM1" -ge "$NUM2" ]; then
+        sudo rm -f $PCRPI/*gpg
+fi
+
+# Si se han traido alguna copia se borra para no saturar la memoria
+sudo rm -f $PCOPIAS/*gpg
+
+# De igual forma comprobamos la copia de los ficheros .asc
+NUM1=$(ls -l $PCOPIAS/ | grep $FECHA | wc -l)
+NUM2=$(ls -l $PCRPI/ | grep $FECHA | wc -l)
+
+if [ "$NUM1" -ge "$NUM2" ]; then
+        sudo rm -f $PCRPI/*asc
+fi
+
+sudo rm -f $PCOPIAS/*asc
+
+# Finalmente borramos del directorio temporal los archivos
+rm -f /tmp/motion/*jpg
+rm -f /tmp/motion/*avi
